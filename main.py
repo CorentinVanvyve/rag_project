@@ -33,7 +33,7 @@ File content : """
 
     # Define the payload (your input prompt)
     payload = {
-        "model": "codexpert",  # Replace with the model name you're using
+        "model": "junior",  # Replace with the model name you're using
         "messages": [{"role": "user", "content": f"{prompt}\n\n{content}"}]
     }
 
@@ -93,7 +93,7 @@ def process_file(file_path: str, output_dir: str) -> None:
 """
 
         # Create relative path for output file
-        relative_path = os.path.relpath(file_path, './repo_optimized')
+        relative_path = os.path.relpath(file_path, 'original_repo')
         output_path = os.path.join(output_dir, relative_path)
 
         # Create output directory if it doesn't exist
@@ -120,7 +120,7 @@ def count_files_to_process(base_dir: str) -> int:
 def upload_optimized_file():
     """Main function to process all files in the directory and save them locally."""
     # Directory to process
-    base_dir = './original_repo'
+    base_dir = 'original_repo'
 
     # Create output directory
     output_dir = os.path.join(os.path.dirname(base_dir), 'processed_files')
