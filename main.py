@@ -33,7 +33,7 @@ File content : """
 
     # Define the payload (your input prompt)
     payload = {
-        "model": "junior",  # Replace with the model name you're using
+        "model": "codexpert",  # Replace with the model name you're using
         "messages": [{"role": "user", "content": f"{prompt}\n\n{content}"}]
     }
 
