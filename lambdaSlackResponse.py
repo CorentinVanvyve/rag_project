@@ -6,90 +6,117 @@ import boto3
 import urllib3
 from botocore.exceptions import BotoCoreError, ClientError
 
-# Configure logging
+# Initialize logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Environment variables
-SLACK_TOKEN = os.environ.get("slackToken") # you can get this from the slack app : OAuth & Permissions > Bot User OAuth Token
+# Load environment variables
+SLACK_TOKEN = os.environ.get("slackToken") # you can get this from the slack app : OAuth & Permissions >
 SLACK_URL = os.environ.get("slackUrl") # https://slack.com/api/chat.postMessage
 REGION_NAME = os.environ.get("regionName") # you can get this from the bedrock agent
 AGENT_ID = os.environ.get("agentId") # you can get this from the bedrock agent
 AGENT_ALIAS_ID = os.environ.get("agentAliasId") # you can get this from the bedrock agent
+BOT_USER_ID = "U090ZPKV2JE"  # Replace with your actual Bot User ID
 
-# Reuse HTTP connection
+# Initialize HTTP connection pool
 http = urllib3.PoolManager()
 
-#  Send message to Slack
-def send_slack_message(message: str, channel: str, ts: str = None) -> dict:
-    data = {
+
+def send_message_to_slack(message: str, channel: str ) -> dict:
+    """
+    Sends a message to a Slack channel.
+
+    Args:
+        message (str): The text to send.
+        channel (str): The Slack channel ID.
+
+    Returns:
+        dict: Slack API response.
+    """
+    payload = {
         "channel": channel,
-        "text": message,
-        "thread_ts": ts
+        "text": message
     }
+
     headers = {
         "Authorization": f"Bearer {SLACK_TOKEN}",
         "Content-Type": "application/json"
     }
 
     try:
-        response = http.request("POST", SLACK_URL, headers=headers, body=json.dumps(data))
-        logger.info(f"Slack request sent: {data}")
+        response = http.request("POST", SLACK_URL, headers=headers, body=json.dumps(payload))
         return json.loads(response.data.decode("utf-8"))
     except Exception as e:
         logger.error(f"Failed to send message to Slack: {e}")
         return {"ok": False, "error": str(e)}
 
-#  Call Bedrock agent
-def invoke_bedrock_agent(question: str, session_id: str, channel: str, ts: str) -> str:
+
+def query_bedrock_agent(question: str, session_id: str, channel: str ) -> str:
+    """
+    Sends a user question to the Bedrock agent and streams the response to Slack.
+
+    Args:
+        question (str): User input.
+        session_id (str): Unique session ID.
+        channel (str): Slack channel ID.
+
+    Returns:
+        str: Full concatenated agent response.
+    """
     client = boto3.client("bedrock-agent-runtime", region_name=REGION_NAME)
     full_response = ""
 
     try:
         response = client.invoke_agent(
-            agentId=AGENT_ID,
-            agentAliasId=AGENT_ALIAS_ID,
+            agentId=BEDROCK_AGENT_ID,
+            agentAliasId=BEDROCK_AGENT_ALIAS_ID,
             sessionId=session_id,
             inputText=question
         )
-        logger.info("Agent invoked successfully.")
 
         for event in response.get("completion", []):
             if "chunk" in event:
-                message_part = event["chunk"]["bytes"].decode("utf-8")
-                send_slack_message(message_part, channel, ts)
-                full_response += message_part
+                part = event["chunk"]["bytes"].decode("utf-8")
+                send_message_to_slack(part, channel)
+                full_response += part
 
     except (BotoCoreError, ClientError) as e:
         logger.error(f"Bedrock agent invocation failed: {e}")
     return full_response
 
-#  Lambda handler
-def lambda_handler(raw_event, context):
-    logger.info(f"Lambda triggered: {context.function_name} | Request ID: {context.aws_request_id}")
+
+def lambda_handler(event, context):
+    """
+    AWS Lambda function entry point.
+
+    Args:
+        event (dict): Lambda event payload.
+        context (LambdaContext): Runtime information.
+
+    Returns:
+        dict: HTTP response.
+    """
+    logger.info(f"Received event: {event}")
 
     try:
-        payload = json.loads(raw_event.get("body", "{}"))
-        event = payload.get("event", {})
-        event_type = event.get("type")
+        body = json.loads(event.get("body", "{}"))
+        slack_event = body.get("event", {})
+        event_type = slack_event.get("type")
 
-        # Extract required values
-        question = event.get("text")
-        ts = event.get("ts")
-        thread_ts = event.get("thread_ts")
-        channel = event.get("channel")
-        slack_user_id = event.get("user")
+        user_message = slack_event.get("text")
+        channel_id = slack_event.get("channel")
+        timestamp = slack_event.get("ts")
+        user_id = slack_event.get("user")
+        channel_type = slack_event.get("channel_type")
 
-        logger.info(f"Event type: {event_type}, Channel: {channel}, User: {slack_user_id}")
-
-        # Respond to direct messages from users (exclude bot's own ID)
+        # Process only direct messages from users (not from the bot itself)
         if (
             event_type == "message"
-            and event.get("channel_type") == "im"
-            and slack_user_id != "U08QUTRS6SZ"
+            and channel_type == "im"
+            and user_id != BOT_USER_ID
         ):
-            send_slack_message("Thinking ...", channel, ts)
-            invoke_bedrock_agent(question, thread_ts or ts, channel, ts)
+            send_message_to_slack("Thinking ...", channel_id)
+            query_bedrock_agent(user_message, timestamp, channel_id)
 
         return {
             "statusCode": 200,
@@ -97,7 +124,7 @@ def lambda_handler(raw_event, context):
         }
 
     except Exception as e:
-        logger.error(f"Error handling event: {e}")
+        logger.error(f"Error processing event: {e}")
         return {
             "statusCode": 500,
             "body": json.dumps({"error": "Internal Server Error"})
